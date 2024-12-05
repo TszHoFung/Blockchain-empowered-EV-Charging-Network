@@ -1,0 +1,16 @@
+const ChargingStationToken = artifacts.require("ChargingStationToken");
+const ChargingStationNetwork = artifacts.require("ChargingStationNetwork");
+
+module.exports = async function(deployer) {
+    await deployer.deploy(
+        ChargingStationToken,
+        "0xYourEcosystemRewardsAddress",
+        "0xYourTechnicalDevelopmentAddress",
+        "0xYourInvestorAddress",
+        "0xYourCommunityFundAddress",
+        "0xYourReserveFundAddress"
+    );
+
+    const tokenInstance = await ChargingStationToken.deployed();
+    await deployer.deploy(ChargingStationNetwork, tokenInstance.address);
+};

@@ -1,0 +1,50 @@
+const ChargingStationToken = artifacts.require("ChargingStationToken");
+const ChargingStationNetwork = artifacts.require("ChargingStationNetwork");
+
+contract("ChargingStationNetwork", accounts => {
+    let token;
+    let network;
+    const owner = accounts[0];
+    const user = accounts[1];
+    const station = accounts[2];
+    const reporter = accounts[3];
+
+    before(async () => {
+        token = await ChargingStationToken.deployed();
+        network = await ChargingStationNetwork.deployed();
+
+        // 添加充电桩
+        await network.addChargingStation(web3.utils.toWei('1', 'ether'), { from: station });
+
+        // 授权网络合约使用用户代币
+        await token.approve(network.address, web3.utils.toWei('100', 'ether'), { from: user });
+    });
+
+    it("should charge electric vehicle and grant rewards", async () => {
+        // 第一次充电
+        await network.chargeElectricVehicle(station, 10, false, true, { from: user });
+        assert.equal(await token.balanceOf(user), web3.utils.toWei('99.5', 'ether'));
+
+        // 第五次充电
+        for (let i = 1; i < 5; i++) {
+            await network.chargeElectricVehicle(station, 10, false, true, { from: user });
+        }
+        assert.equal(await token.balanceOf(user), web3.utils.toWei('99', 'ether')); // 1代币奖励
+
+        // 第二十次充电
+        for (let i = 5; i < 20; i++) {
+            await network.chargeElectricVehicle(station, 10, false, true, { from: user });
+        }
+        assert.equal(await token.balanceOf(user), web3.utils.toWei('97', 'ether')); // 2代币奖励
+    });
+
+    it("should penalize user for not returning the charging plug", async () => {
+        await network.chargeElectricVehicle(station, 10, false, false, { from: user });
+        assert.equal(await token.balanceOf(user), web3.utils.toWei('96.5', 'ether')); // 0.5代币惩罚
+    });
+
+    it("should reward user for reporting bad behavior", async () => {
+        await network.reportBadBehavior(user, reporter, { from: owner });
+        assert.equal(await token.balanceOf(reporter), web3.utils.toWei('0.3', 'ether'));
+    });
+});

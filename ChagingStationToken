@@ -1,0 +1,119 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+contract ChargingStationToken is ERC20, Ownable {
+    using SafeMath for uint256;
+
+    uint256 public constant TOTAL_SUPPLY = 100000000 * (10 ** 18); // 1亿个代币
+
+    uint256 public initialCirculatingSupply;
+    uint256 public ecosystemRewardsSupply;
+    uint256 public technicalDevelopmentSupply;
+    uint256 public investorSupply;
+    uint256 public communityFundSupply;
+    uint256 public reserveFundSupply;
+
+    uint256 public ecosystemRewardsLastReleaseTime;
+    uint256 public constant ECO_REWARDS_ANNUAL_RELEASE = TOTAL_SUPPLY.mul(10).div(100).div(10); // 每年释放1%
+
+    uint256 public technicalDevelopmentUnlockTime;
+    uint256 public technicalDevelopmentReleaseRate;
+
+    uint256 public investorUnlockTime;
+    uint256 public investorReleaseRate;
+
+    address public ecosystemRewardsAddress;
+    address public technicalDevelopmentAddress;
+    address public investorAddress;
+    address public communityFundAddress;
+    address public reserveFundAddress;
+
+    // 用户使用次数和奖励/惩罚状态
+    mapping(address => uint256) public userUsageCount;
+    mapping(address => uint256) public userRewards;
+    mapping(address => uint256) public userPenalties;
+    mapping(address => bool) public userReported;
+
+    constructor(
+        address _ecosystemRewardsAddress,
+        address _technicalDevelopmentAddress,
+        address _investorAddress,
+        address _communityFundAddress,
+        address _reserveFundAddress
+    ) ERC20("ChargingStationToken", "CST") {
+        initialCirculatingSupply = TOTAL_SUPPLY.mul(30).div(100);
+        ecosystemRewardsSupply = TOTAL_SUPPLY.mul(10).div(100);
+        technicalDevelopmentSupply = TOTAL_SUPPLY.mul(15).div(100);
+        investorSupply = TOTAL_SUPPLY.mul(20).div(100);
+        communityFundSupply = TOTAL_SUPPLY.mul(15).div(100);
+        reserveFundSupply = TOTAL_SUPPLY.mul(10).div(100);
+
+        _mint(msg.sender, initialCirculatingSupply);
+        _mint(ecosystemRewardsAddress = _ecosystemRewardsAddress, ecosystemRewardsSupply);
+        _mint(technicalDevelopmentAddress = _technicalDevelopmentAddress, technicalDevelopmentSupply);
+        _mint(investorAddress = _investorAddress, investorSupply);
+        _mint(communityFundAddress = _communityFundAddress, communityFundSupply);
+        _mint(reserveFundAddress = _reserveFundAddress, reserveFundSupply);
+
+        ecosystemRewardsLastReleaseTime = block.timestamp;
+
+        technicalDevelopmentUnlockTime = block.timestamp + 2 years;
+        technicalDevelopmentReleaseRate = technicalDevelopmentSupply.div(4 years);
+
+        investorUnlockTime = block.timestamp + 1 years;
+        investorReleaseRate = investorSupply.div(2 years);
+    }
+
+    function releaseEcosystemRewards() public {
+        require(block.timestamp >= ecosystemRewardsLastReleaseTime + 1 years, "Not yet time to release rewards");
+        uint256 amountToRelease = ECO_REWARDS_ANNUAL_RELEASE;
+        _transfer(ecosystemRewardsAddress, msg.sender, amountToRelease);
+        ecosystemRewardsLastReleaseTime = block.timestamp;
+    }
+
+    function claimTechnicalDevelopmentTokens() public {
+        require(msg.sender == technicalDevelopmentAddress, "Only technical development address can claim tokens");
+        require(block.timestamp >= technicalDevelopmentUnlockTime, "Tokens are still locked");
+        uint256 elapsedTime = block.timestamp.sub(technicalDevelopmentUnlockTime);
+        uint256 amountToClaim = elapsedTime.mul(technicalDevelopmentReleaseRate).div(1 days);
+        if (amountToClaim > balanceOf(technicalDevelopmentAddress)) {
+            amountToClaim = balanceOf(technicalDevelopmentAddress);
+        }
+        _transfer(technicalDevelopmentAddress, msg.sender, amountToClaim);
+    }
+
+    function claimInvestorTokens() public {
+        require(msg.sender == investorAddress, "Only investor address can claim tokens");
+        require(block.timestamp >= investorUnlockTime, "Tokens are still locked");
+        uint256 elapsedTime = block.timestamp.sub(investorUnlockTime);
+        uint256 amountToClaim = elapsedTime.mul(investorReleaseRate).div(1 days);
+        if (amountToClaim > balanceOf(investorAddress)) {
+            amountToClaim = balanceOf(investorAddress);
+        }
+        _transfer(investorAddress, msg.sender, amountToClaim);
+    }
+
+    // 奖励用户代币
+    function rewardUser(address _user, uint256 _amount) internal {
+        _mint(_user, _amount);
+        userRewards[_user] = userRewards[_user].add(_amount);
+    }
+
+    // 处罚用户代币
+    function penalizeUser(address _user, uint256 _amount) internal {
+        require(balanceOf(_user) >= _amount, "Insufficient balance to penalize");
+        _burn(_user, _amount);
+        userPenalties[_user] = userPenalties[_user].add(_amount);
+    }
+
+    // 用户举报不良行为
+    function reportBadBehavior(address _user, address _reporter) external {
+        require(!userReported[_user], "User has already been reported");
+        userReported[_user] = true;
+        rewardUser(_reporter, 0.3 * (10 ** 18)); // 奖励0.3代币
+    }
+}s

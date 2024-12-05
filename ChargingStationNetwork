@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+contract ChargingStationNetwork is Ownable {
+    using SafeMath for uint256;
+
+    IERC20 public token;
+    uint256 public transactionFeeRate = 50; // 0.5% transaction fee rate
+
+    struct ChargingStation {
+        address owner;
+        bool isActive;
+        uint256 pricePerKWh; // Price per kWh in wei
+    }
+
+    mapping(address => ChargingStation) public chargingStations;
+    mapping(address => uint256) public userBalances; // User balances in wei for fiat transactions
+
+    event ChargingStationAdded(address indexed station, address indexed owner, uint256 pricePerKWh);
+    event ChargingStationRemoved(address indexed station);
+    event ChargingStationUpdated(address indexed station, uint256 newPricePerKWh);
+    event ChargeCompleted(address indexed station, address indexed user, uint256 kWh, uint256 cost, uint256 fee);
+    event RewardGranted(address indexed user, uint256 amount);
+    event PenaltyApplied(address indexed user, uint256 amount);
+
+    constructor(address _tokenAddress) {
+        token = IERC20(_tokenAddress);
+    }
+
+    modifier onlyStationOwner(address station) {
+        require(chargingStations[station].owner == msg.sender, "Not the station owner");
+        _;
+    }
+
+    modifier onlyActiveStation(address station) {
+        require(chargingStations[station].isActive, "Station is not active");
+        _;
+    }
+
+    function addChargingStation(uint256 _pricePerKWh) external {
+        require(chargingStations[msg.sender].isActive == false, "Station already exists");
+        chargingStations[msg.sender] = ChargingStation({
+            owner: msg.sender,
+            isActive: true,
+            pricePerKWh: _pricePerKWh
+        });
+        emit ChargingStationAdded(msg.sender, msg.sender, _pricePerKWh);
+    }
+
+    function removeChargingStation() external onlyStationOwner(msg.sender) {
+        delete chargingStations[msg.sender];
+        emit ChargingStationRemoved(msg.sender);
+    }
+
+    function updateChargingStationPrice(uint256 _newPricePerKWh) external onlyStationOwner(msg.sender) {
+        chargingStations[msg.sender].pricePerKWh = _newPricePerKWh;
+        emit ChargingStationUpdated(msg.sender, _newPricePerKWh);
+    }
+
+    function chargeElectricVehicle(address _station, uint256 _kWh, bool _useFiat, bool _correctlyReturned) external payable onlyActiveStation(_station) {
+        ChargingStation memory station = chargingStations[_station];
+        uint256 cost = _kWh.mul(station.pricePerKWh);
+        uint256 fee = cost.mul(transactionFeeRate).div(10000); // 0.5% fee
+        uint256 totalCost = cost.add(fee);
+
+        if (_useFiat) {
+            require(msg.value >= totalCost, "Insufficient fiat balance");
+            userBalances[msg.sender] = userBalances[msg.sender].add(msg.value);
+        } else {
+            require(token.transferFrom(msg.sender, address(this), totalCost), "Token transfer failed");
+        }
+
+        // 更新用户使用次数
+        uint256 usageCount = ChargingStationToken(address(token)).userUsageCount(msg.sender);
+        usageCount = usageCount.add(1);
+        ChargingStationToken(address(token)).updateUserUsageCount(msg.sender, usageCount);
+
+        // 根据使用次数发放奖励
+        if (usageCount % 5 == 0) {
+            ChargingStationToken(address(token)).rewardUser(msg.sender, 1 * (10 ** 18)); // 奖励1代币
+            emit RewardGranted(msg.sender, 1 * (10 ** 18));
+        } else if (usageCount % 20 == 0) {
+            ChargingStationToken(address(token)).rewardUser(msg.sender, 2 * (10 ** 18)); // 奖励2代币
+            emit RewardGranted(msg.sender, 2 * (10 ** 18));
+        }
+
+        // 如果用户没有正确放回充电插头，扣除0.5代币
+        if (!_correctlyReturned) {
+            ChargingStationToken(address(token)).penalizeUser(msg.sender, 0.5 * (10 ** 18)); // 扣除0.5代币
+            emit PenaltyApplied(msg.sender, 0.5 * (10 ** 18));
+        }
+
+        emit ChargeCompleted(_station, msg.sender, _kWh, cost, fee);
+    }
+
+    function getUserBalance(address _user) external view returns (uint256) {
+        return userBalances[_user];
+    }
+
+    function getStationDetails(address _station) external view returns (address, bool, uint256) {
+        ChargingStation memory station = chargingStations[_station];
+        return (station.owner, station.isActive, station.pricePerKWh);
+    }
+
+    function withdrawFees() external onlyOwner {
+        payable(owner()).transfer(address(this).balance);
+    }
+
+    function withdrawTokens(uint256 _amount) external onlyOwner {
+        require(token.transfer(owner(), _amount), "Token transfer failed");
+    }
+}
